@@ -1,5 +1,7 @@
 use std::fmt::Debug;
 
+const MAX_LABEL_LENGTH: usize = 255;
+
 pub struct Header {
     _id: u16,          // Identifier assigned by the program that generates any kind of query.
     _bitfield: u16,    // QR, Opcode, AA flag, TC flag, RD flag, RA flag, Z, RCODE.
@@ -21,7 +23,8 @@ impl Header {
             _arcount: arcount,
         }
     }
-    pub fn from_bytes(bytes: [u8; 12]) -> Header {
+    pub fn from_bytes(bytes: &[u8]) -> Header {
+        assert!(bytes.len() >= 12);
         Header {
             _id: u16::from_be_bytes([bytes[0], bytes[1]]),
             _bitfield: u16::from_be_bytes([bytes[2], bytes[3]]),
@@ -32,8 +35,8 @@ impl Header {
         }
     }
 
-    pub fn to_bytes(&self) -> [u8; 12] {
-        [
+    pub fn to_bytes(&self) -> Vec<u8> {
+        Vec::from([
             self._id.to_be_bytes()[0],
             self._id.to_be_bytes()[1],
             self._bitfield.to_be_bytes()[0],
@@ -46,7 +49,7 @@ impl Header {
             self._nscount.to_be_bytes()[1],
             self._arcount.to_be_bytes()[0],
             self._arcount.to_be_bytes()[1],
-        ]
+        ])
     }
 
     pub fn id(&self) -> u16 {
@@ -135,5 +138,67 @@ impl Debug for Header {
             self.nscount(),
             self.arcount()
         )
+    }
+}
+
+pub struct Question {
+    _qname: String,
+    _qtype: u16,
+    _qclass: u16,
+}
+
+impl Debug for Question {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Question {{ qname: {}, qt: {},  qc: {} }}", self._qname, self._qtype, self._qclass
+        )
+    }
+}
+
+impl Question {
+    pub fn new(qname: &str, qtype: u16, qclass: u16) -> Question {
+        Question {
+            _qname: String::from(qname),
+            _qtype: qtype,
+            _qclass: qclass,
+        }
+    }
+    pub fn from_bytes(bytes: &[u8]) -> (Question, usize) {
+        let mut qname = String::new();
+        let mut offset = 0;
+        while bytes[offset] != 0 {
+            let len = (bytes[offset] as u8).to_le();
+            offset += 1;
+            for i in 0..len {
+                qname.push(bytes[offset + i as usize] as char);
+            }
+            offset += len as usize;
+            if bytes[offset] != 0 {
+                qname.push('.');
+            } else {
+                offset += 1;
+            }
+        }
+        (
+            Question {
+                _qname: qname,
+                _qtype: u16::from_be_bytes([bytes[offset], bytes[offset + 1]]),
+                _qclass: u16::from_be_bytes([bytes[offset+2], bytes[offset+3]]),
+            },
+            offset
+        )
+    }
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        for label in self._qname.split('.') {
+            if label.len() > MAX_LABEL_LENGTH {
+                panic!("Max token length exceeded");
+            }
+            bytes.push(label.len() as u8);
+            bytes.append(&mut Vec::from(label.as_bytes()));
+        }
+        bytes.push(0 as u8);
+        bytes.append(&mut Vec::from(self._qtype.to_be_bytes()));
+        bytes.append(&mut Vec::from(self._qclass.to_be_bytes()));
+        bytes
     }
 }
