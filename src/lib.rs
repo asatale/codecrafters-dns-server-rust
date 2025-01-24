@@ -243,7 +243,7 @@ impl DomainName {
 #[derive(Debug)]
 pub struct Header {
     id: u16,       // Identifier assigned by the program that generates any kind of query.
-    bitfield: u16, // QR, Opcode, AA flag, TC flag, RD flag, RA flag, Z, RCODE.
+    pub bitfield: u16, // QR, Opcode, AA flag, TC flag, RD flag, RA flag, Z, RCODE.
     qdcount: u16,  // Number of entries in the question section.
     ancount: u16,  // Number of resource records in the answer section.
     nscount: u16,  // Number of name server resource records in the authority records section.
@@ -287,15 +287,21 @@ impl Header {
         nameservers: u16,
         additional: u16,
     ) -> Self {
+        let mut rcode = 0; // No Error
+        let request_opcode = request_header.opcode();
+        if request_opcode != 0 { // Not a standard query
+            rcode = 4; // Not implemented
+        }
+
         Header::new(
             request_header.id(),
             true,
-            request_header.opcode(),
+            request_opcode,
             authorative_response,
             false, // Truncated
-            false, // Recursion desired
-            true,  // Recursion available
-            0,     // rcode
+            request_header.rd(),
+            false,  // Recursion available
+            rcode,
             request_header.qdcount(),
             answers,
             nameservers,
@@ -340,7 +346,9 @@ impl Header {
         self.bitfield & 0x8000 != 0
     }
     pub fn opcode(&self) -> u8 {
-        (self.bitfield & 0x7800 >> 11).try_into().unwrap()
+        let b = self.bitfield & 0x7800;
+        let b = (b >> 11) as u8;
+        b
     }
     pub fn aa(&self) -> bool {
         self.bitfield & 0x0400 != 0
@@ -684,7 +692,7 @@ impl std::fmt::Display for DNSResponse {
         }
         write!(
             f,
-            "DNS_Request {{ header: {}, question: {}, answers: {}, authority: {}, additional: {}}}",
+            "DNS_Response {{ header: {}, question: {}, answers: {}, authority: {}, additional: {}}}",
             self.header, qstring, astring, austring, adstring
         )
     }

@@ -18,7 +18,6 @@ fn main() {
                 let buf = Vec::from(buffer);
                 let request = DNSRequest::from_bytes(&buf).unwrap();
                 println!("Received {}", request);
-
                 let mut answers = Vec::<RRecord>::new();
                 let mut questions= Vec::<Question>::new();
                 for q in request.questions {
