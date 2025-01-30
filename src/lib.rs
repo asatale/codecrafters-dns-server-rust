@@ -1,5 +1,6 @@
 use std::{error::Error, fmt::Debug, str::FromStr};
 
+
 const DNS_HEADER_SIZE: usize = 12;
 const MAX_LABEL_LENGTH: usize = 255;
 const RESOURCE_RECORD_MIN_SIZE: usize = 10;
@@ -77,32 +78,33 @@ impl std::fmt::Display for Type {
 }
 
 impl Type {
-    fn from_bytes(bytes: &[u8]) -> Result<Type, ErrorCondition> {
-        match u16::from_be_bytes([bytes[0], bytes[1]]) {
-            1 => Ok(Type::A),
-            2 => Ok(Type::NS),
-            3 => Ok(Type::MD),
-            4 => Ok(Type::MF),
-            5 => Ok(Type::CNAME),
-            6 => Ok(Type::SOA),
-            7 => Ok(Type::MB),
-            8 => Ok(Type::MG),
-            9 => Ok(Type::MR),
-            10 => Ok(Type::NULL),
-            11 => Ok(Type::WKS),
-            12 => Ok(Type::PTR),
-            13 => Ok(Type::HINFO),
-            14 => Ok(Type::MINFO),
-            15 => Ok(Type::MX),
-            16 => Ok(Type::TXT),
-            252 => Ok(Type::AXFR),
-            253 => Ok(Type::MAILB),
-            254 => Ok(Type::MAILA),
-            255 => Ok(Type::_ALL_),
-            _ => Err(ErrorCondition::DeserializationErr(
-                "Error in parsing ResourceType",
-            )),
-        }
+    fn from_bytes(bytes: &[u8], offset:usize) -> Result<(Type, usize), ErrorCondition> {
+        let inet_type = match u16::from_be_bytes([bytes[offset], bytes[offset+1]]) {
+            1 => Type::A,
+            2 => Type::NS,
+            3 => Type::MD,
+            4 => Type::MF,
+            5 => Type::CNAME,
+            6 => Type::SOA,
+            7 => Type::MB,
+            8 => Type::MG,
+            9 => Type::MR,
+            10 => Type::NULL,
+            11 => Type::WKS,
+            12 => Type::PTR,
+            13 => Type::HINFO,
+            14 => Type::MINFO,
+            15 => Type::MX,
+            16 => Type::TXT,
+            252 => Type::AXFR,
+            253 => Type::MAILB,
+            254 => Type::MAILA,
+            255 => Type::_ALL_,
+            _ => {
+                return Err(ErrorCondition::DeserializationErr("Error in parsing ResourceType"));
+            }
+        };
+        Ok((inet_type, offset+2))
     }
     fn to_bytes(&self) -> Result<[u8; 2], ErrorCondition> {
         let num: u16 = match self {
@@ -152,17 +154,19 @@ impl std::fmt::Display for Class {
     }
 }
 impl Class {
-    pub fn from_bytes(bytes: &[u8]) -> Result<Class, ErrorCondition> {
-        match u16::from_be_bytes([bytes[0], bytes[1]]) {
-            1 => Ok(Class::IN),
-            2 => Ok(Class::CS),
-            3 => Ok(Class::CH),
-            4 => Ok(Class::HS),
-            255 => Ok(Class::_ANY_),
-            _ => Err(ErrorCondition::DeserializationErr(
-                "Received Unknown class value",
-            )),
-        }
+    pub fn from_bytes(bytes: &[u8], offset: usize) -> Result<(Class, usize), ErrorCondition> {
+        let class=    match u16::from_be_bytes([bytes[offset], bytes[offset+1]]) {
+            1 => Class::IN,
+            2 => Class::CS,
+            3 => Class::CH,
+            4 => Class::HS,
+            255 => Class::_ANY_,
+            _ => {
+                return Err(
+                    ErrorCondition::DeserializationErr("Received Unknown class value"));
+            }
+        };
+        Ok((class, offset+2))
     }
     pub fn to_bytes(&self) -> Result<[u8; 2], ErrorCondition> {
         let num: u16 = match self {
@@ -194,7 +198,7 @@ impl DomainName {
             name: String::from_str(name).unwrap(),
         }
     }
-    fn from_bytes(bytes: &[u8]) -> Result<(DomainName, usize), ErrorCondition> {
+    fn from_bytes(bytes: &[u8], offset: usize) -> Result<(DomainName, usize), ErrorCondition> {
         fn increment_by(offset: usize, step: usize, max: usize) -> Result<usize, ErrorCondition> {
             if (offset + step) < max {
                 return Ok(offset + step);
@@ -205,22 +209,36 @@ impl DomainName {
         }
 
         let mut name = String::new();
-        let mut offset = 0;
+        let mut offset = offset;
         let buf_length = bytes.len();
+        let mut orig_offset = 0;
+
 
         while bytes[offset] != 0 {
             let len = (bytes[offset] as u8).to_le();
-            offset = increment_by(offset, 1, buf_length)?;
-            for i in 0..len {
-                name.push(bytes[offset + i as usize] as char);
+            // Check for compression
+            if (len & 0xC0 as u8) == 0xC0 {
+                // if first two bits are set then it represents compression
+                offset = increment_by(offset, 1, buf_length)?;
+                let ptr = (bytes[offset] as u8).to_le();
+                orig_offset = offset;
+                // set offset to new compression pointer
+                offset = ptr as usize;
+            } else {
+                offset = increment_by(offset, 1, buf_length)?;
+                for i in 0..len {
+                    name.push(bytes[offset + i as usize] as char);
+                }
+                offset = increment_by(offset, len as usize, buf_length)?;
+                name.push('.');
             }
-            offset = increment_by(offset, len as usize, buf_length)?;
-            if bytes[offset] == 0 {
-                break;
-            }
-            name.push('.');
         }
-        Ok((DomainName::new(&name), offset + 1))
+
+        if orig_offset != 0 {
+            offset = orig_offset;
+        }
+
+        Ok((DomainName::new(&name), offset+1))
     }
 
     fn to_bytes(&self) -> Result<Vec<u8>, ErrorCondition> {
@@ -231,8 +249,10 @@ impl DomainName {
                     "Label length more max permitted",
                 ));
             }
-            bytes.push(label.len() as u8);
-            bytes.append(&mut Vec::from(label.as_bytes()));
+            if label.len() != 0 {
+                bytes.push(label.len() as u8);
+                bytes.append(&mut Vec::from(label.as_bytes()));
+            }
         }
         bytes.push(0 as u8);
         Ok(bytes)
@@ -308,7 +328,8 @@ impl Header {
             additional,
         )
     }
-    pub fn from_bytes(bytes: &[u8]) -> Result<Header, ErrorCondition> {
+    pub fn from_bytes(bytes: &[u8], offset: usize) -> Result<Header, ErrorCondition> {
+        let bytes = &bytes[offset..];
         if bytes.len() < 12 {
             return Err(ErrorCondition::SerializationErr(
                 "Short buffer in parsing header",
@@ -461,20 +482,16 @@ impl Question {
         }
     }
 
-    pub fn from_bytes(bytes: &[u8]) -> Result<(Question, usize), ErrorCondition> {
-        let (qname, offset) = DomainName::from_bytes(bytes)?;
+    pub fn from_bytes(bytes: &[u8], offset: usize) -> Result<(Question, usize), ErrorCondition> {
+        let (qname, offset) = DomainName::from_bytes(bytes, offset)?;
+        let (qtype, offset) = Type::from_bytes(bytes, offset)?;
+        let (qclass, offset) = Class::from_bytes(bytes, offset)?;
 
-        if bytes.len() - offset < 4 {
-            // Assert for presence of additional 4 bytes for type and class
-            return Err(ErrorCondition::DeserializationErr(
-                "Short buffer parsing Question",
-            ));
-        }
         Ok((
             Question {
                 qname,
-                qtype: Type::from_bytes(&bytes[offset..offset + 2])?,
-                qclass: Class::from_bytes(&bytes[offset + 2..offset + 4])?,
+                qtype: qtype,
+                qclass: qclass,
             },
             offset,
         ))
@@ -558,16 +575,13 @@ impl RRecord {
         }
     }
 
-    pub fn from_bytes(bytes: &[u8]) -> Result<(RRecord, usize), ErrorCondition> {
-        let (domain_name, offset) = DomainName::from_bytes(bytes)?;
+    pub fn from_bytes(bytes: &[u8], offset: usize) -> Result<(RRecord, usize), ErrorCondition> {
+        let (domain_name, offset) = DomainName::from_bytes(bytes, offset)?;
         if bytes.len() - offset < RESOURCE_RECORD_MIN_SIZE {
             return Err(ErrorCondition::DeserializationErr("Short buffer parsing"));
         }
-        let rrtype = Type::from_bytes(&bytes[offset..])?;
-        let offset = offset + 2;
-
-        let rclass = Class::from_bytes(&bytes[offset + 2..])?;
-        let offset = offset + 2;
+        let (rrtype, offset) = Type::from_bytes(bytes, offset)?;
+        let (rclass, offset) = Class::from_bytes(bytes, offset)?;
 
         let (ttl_bytes, rest) = bytes[offset..].split_at(std::mem::size_of::<u32>());
         let ttl: u32 = u32::from_be_bytes(ttl_bytes.try_into().unwrap());
@@ -609,6 +623,7 @@ impl RRecord {
 pub struct DNSRequest {
     pub header: Header,
     pub questions: Vec<Question>,
+    pub additional: Vec<RRecord>,
 }
 
 impl std::fmt::Display for DNSRequest {
@@ -626,27 +641,36 @@ impl std::fmt::Display for DNSRequest {
 }
 
 impl DNSRequest {
-    pub fn new(header: Header, question: Vec<Question>) -> DNSRequest {
+    pub fn new(header: Header, question: Vec<Question>, additional: Vec<RRecord>) -> DNSRequest {
         DNSRequest {
             header: header,
             questions: question,
+            additional: additional,
         }
     }
 
     pub fn from_bytes(bytes: &[u8]) -> Result<DNSRequest, ErrorCondition> {
-        let header = Header::from_bytes(bytes)?;
-        let bytes = &bytes[DNS_HEADER_SIZE..];
+        let mut offset = 0;
+        let header = Header::from_bytes(bytes, offset)?;
+        offset += DNS_HEADER_SIZE;
+
         let mut questions = Vec::<Question>::new();
-        let mut skip = 0;
         for _i in 0..header.qdcount() {
-            let bytes = &bytes[skip..];
-            let (question, offset) = Question::from_bytes(bytes).unwrap();
-            skip = offset;
+            let (question, skip) = Question::from_bytes(bytes, offset).unwrap();
+            offset = skip;
             questions.push(question);
         }
+        // let mut additional = Vec::<RRecord>::new();
+        // for _i in 0..header.arcount() {
+        //     let (rrecord, skip) = RRecord::from_bytes(bytes, offset).unwrap();
+        //     offset = skip;
+        //     additional.push(rrecord);
+        // }
+
         Ok(DNSRequest {
             header: header,
             questions: questions,
+            additional: Vec::<RRecord>::new()
         })
     }
     pub fn to_bytes(&self) -> Result<Vec<u8>, ErrorCondition> {
@@ -715,40 +739,35 @@ impl DNSResponse {
         }
     }
 
-    pub fn from_bytes(bytes: &[u8]) -> Result<DNSResponse, ErrorCondition> {
-        let header = Header::from_bytes(bytes)?;
-        let bytes = &bytes[DNS_HEADER_SIZE..];
-        let mut skip = 0;
+    pub fn from_bytes(bytes: &[u8], offset:usize) -> Result<DNSResponse, ErrorCondition> {
+        let header = Header::from_bytes(bytes, offset)?;
+        let mut offset = offset + DNS_HEADER_SIZE;
 
         let mut questions = Vec::<Question>::new();
         for _i in 0..header.qdcount() {
-            let bytes = &bytes[skip..];
-            let (question, offset) = Question::from_bytes(bytes).unwrap();
-            skip = offset;
+            let (question, skip) = Question::from_bytes(bytes, offset).unwrap();
+            offset = skip;
             questions.push(question);
         }
 
         let mut answers = Vec::<RRecord>::new();
         for _i in 0..header.ancount() {
-            let bytes = &bytes[skip..];
-            let (answer, offset) = RRecord::from_bytes(bytes).unwrap();
-            skip = offset;
+            let (answer, skip) = RRecord::from_bytes(bytes, offset).unwrap();
+            offset = skip;
             answers.push(answer);
         }
 
         let mut nsservers = Vec::<RRecord>::new();
         for _i in 0..header.nscount() {
-            let bytes = &bytes[skip..];
-            let (ns, offset) = RRecord::from_bytes(bytes).unwrap();
-            skip = offset;
+            let (ns, skip) = RRecord::from_bytes(bytes, offset).unwrap();
+            offset = skip;
             nsservers.push(ns);
         }
 
         let mut additional = Vec::<RRecord>::new();
         for _i in 0..header.nscount() {
-            let bytes = &bytes[skip..];
-            let (ad, offset) = RRecord::from_bytes(bytes).unwrap();
-            skip = offset;
+            let (ad, skip) = RRecord::from_bytes(bytes, offset).unwrap();
+            offset = skip;
             additional.push(ad);
         }
         Ok(DNSResponse {
@@ -781,3 +800,4 @@ impl DNSResponse {
         Ok(bytes)
     }
 }
+

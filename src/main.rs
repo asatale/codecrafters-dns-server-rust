@@ -1,8 +1,20 @@
+#![allow(unused)]
 use codecrafters_dns_server::{Class, DNSRequest, DNSResponse, Header, Question, RRecord, Type};
 use std::net::UdpSocket;
 use std::net::Ipv4Addr;
 
 const DEFAULT_TTL: u32 = 3600;
+
+fn print_hex(bytes: &Vec<u8>) {
+    println!("{} bytes", bytes.len());
+    for (idx, v) in bytes.iter().enumerate() {
+        let idx = idx+1;
+        print!("{:#04x} ", v);
+        if idx % 16 == 0 {
+            println!("");
+        }
+    }
+}
 
 fn main() {
     // You can use print statements as follows for debugging, they'll be visible when running tests.
@@ -16,8 +28,9 @@ fn main() {
         match udp_socket.recv_from(&mut buffer) {
             Ok((_, source)) => {
                 let buf = Vec::from(buffer);
+                //print_hex(&buf);
                 let request = DNSRequest::from_bytes(&buf).unwrap();
-                println!("Received {}", request);
+                //println!("Received {}", request);
                 let mut answers = Vec::<RRecord>::new();
                 let mut questions= Vec::<Question>::new();
                 for q in request.questions {
@@ -40,8 +53,10 @@ fn main() {
                     Vec::<RRecord>::new(),
                     Vec::<RRecord>::new(),
                 );
-                println!("Sending {}", response);
+                //println!("Sending {}", response);
                 let response = response.to_bytes().unwrap();
+                //print_hex(&response);
+
                 udp_socket
                     .send_to(&response, source)
                     .expect("Failed to send response");
