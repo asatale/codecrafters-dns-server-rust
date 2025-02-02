@@ -7,7 +7,7 @@ const MAX_LABEL_LENGTH: usize = 255;
 const RESOURCE_RECORD_MIN_SIZE: usize = 10;
 
 
-fn print_hex(bytes: &Vec<u8>) {
+pub fn print_hex(bytes: &Vec<u8>) {
     println!("{} bytes", bytes.len());
     for (idx, v) in bytes.iter().enumerate() {
         let idx = idx+1;
@@ -39,7 +39,7 @@ impl std::fmt::Display for ErrorCondition {
 
 impl Error for ErrorCondition {}
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Type {
     A = 1,       // a host address
     NS = 2,      // an authoritative name server
@@ -146,7 +146,7 @@ impl Type {
     }
 }
 
-#[derive(Debug,PartialEq, Eq)]
+#[derive(Debug,Clone, PartialEq, Eq)]
 pub enum Class {
     IN = 1,      // the Internet
     CS = 2,      // the CSNET class (Obsolete)
@@ -193,7 +193,7 @@ impl Class {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct DomainName {
     name: String,
 }
@@ -558,7 +558,7 @@ impl Question {
 
 }
 
-#[derive(Debug)]
+#[derive(Debug,Clone)]
 pub struct RRecord {
     name: DomainName,
     rtype: Type,
